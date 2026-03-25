@@ -112,7 +112,7 @@ export default function Home() {
 
       // Rate limiting delay between leads
       if (i < unprocessed.length - 1 && !isStoppedRef.current) {
-        await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, 5000));
       }
     }
 
