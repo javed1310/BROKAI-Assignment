@@ -75,6 +75,62 @@ export default function Home() {
     setBatchProgress(null);
   }, [leads, results]);
 
+  const exportCSV = useCallback(() => {
+    const processedLeads = leads.filter((l) => results[l.id]);
+    if (processedLeads.length === 0) return;
+
+    const headers = [
+      "Company Name",
+      "State",
+      "Email",
+      "Phone",
+      "Business Summary",
+      "Industry",
+      "Website",
+      "Contact Confidence",
+      "Found Contacts",
+      "Outreach Message",
+      "Status",
+    ];
+
+    const rows = processedLeads.map((lead) => {
+      const r = results[lead.id];
+      const profile = r.profile.data;
+      const contacts = r.contacts.data;
+      const outreach = r.outreach.data;
+
+      return [
+        lead.companyName,
+        lead.state,
+        lead.email || lead.cleanEmail || "",
+        lead.phone || "",
+        profile?.summary || "",
+        profile?.industry || "",
+        profile?.digitalPresence.website || "",
+        contacts?.confidence || "",
+        contacts?.contacts
+          .map((c) => [c.name, c.phone, c.email].filter(Boolean).join(" | "))
+          .join("; ") || "",
+        outreach?.whatsappMessage || "",
+        r.status,
+      ];
+    });
+
+    const csvContent = [headers, ...rows]
+      .map((row) =>
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+      )
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "brokai-lead-results.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [leads, results]);
+
   // State 1: Upload screen
   if (leads.length === 0) {
     return (
@@ -97,15 +153,25 @@ export default function Home() {
               {leads.length} companies loaded
             </p>
           </div>
-          <button
-            onClick={() => {
-              setLeads([]);
-              setResults({});
-            }}
-            className="text-sm px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Upload New File
-          </button>
+          <div className="flex items-center gap-3">
+            {Object.keys(results).length > 0 && (
+              <button
+                onClick={exportCSV}
+                className="text-sm px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Export CSV
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setLeads([]);
+                setResults({});
+              }}
+              className="text-sm px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Upload New File
+            </button>
+          </div>
         </div>
       </header>
       <main className="max-w-7xl mx-auto px-6 py-6">
