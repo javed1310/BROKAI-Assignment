@@ -216,7 +216,7 @@ export default function LeadTable({
                           : "hover:bg-gray-50"
                     }`}
                     onClick={() =>
-                      setExpandedId(isExpanded ? null : lead.id)
+                      result ? setExpandedId(isExpanded ? null : lead.id) : undefined
                     }
                   >
                     <td className="px-4 py-3 text-gray-500">{lead.index}</td>
@@ -233,38 +233,37 @@ export default function LeadTable({
                       <StatusBadge status={status} />
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onProcessLead(lead);
-                        }}
-                        disabled={
-                          status === "processing" ||
-                          status === "completed" ||
-                          status === "partial" ||
-                          batchStatus !== "idle"
-                        }
-                        className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      >
-                        {status === "completed" || status === "partial"
-                          ? "Done"
-                          : status === "processing"
-                            ? "Running..."
-                            : "Research"}
-                      </button>
+                      {(status === "completed" || status === "partial") ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedId(isExpanded ? null : lead.id);
+                          }}
+                          className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors font-medium"
+                        >
+                          {isExpanded ? "Hide Results \u25B2" : "View Results \u25BC"}
+                        </button>
+                      ) : status === "processing" ? (
+                        <span className="px-3 py-1 text-xs text-yellow-700 bg-yellow-50 rounded-md inline-flex items-center gap-1">
+                          <span className="w-3 h-3 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+                          Running...
+                        </span>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onProcessLead(lead);
+                          }}
+                          disabled={batchStatus !== "idle"}
+                          className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Research
+                        </button>
+                      )}
                     </td>
                   </tr>
 
-                  {/* Inline compact results (shown automatically for processed leads) */}
-                  {result && !isExpanded && (
-                    <tr className="bg-gray-50/50">
-                      <td colSpan={6} className="px-4 py-2">
-                        <InlineResult result={result} />
-                      </td>
-                    </tr>
-                  )}
-
-                  {/* Full expanded detail (shown on click) */}
+                  {/* Full detail panel (shown when "View Results" is clicked) */}
                   {isExpanded && result && (
                     <tr>
                       <td colSpan={6}>
@@ -305,60 +304,3 @@ export default function LeadTable({
   );
 }
 
-/**
- * Compact inline result shown automatically for processed leads.
- * Shows key info at a glance without expanding.
- */
-function InlineResult({ result }: { result: PipelineResult }) {
-  const profile = result.profile.data;
-  const contacts = result.contacts.data;
-  const outreach = result.outreach.data;
-  const bestContact = contacts?.contacts.find((c) => c.phone || c.email);
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-gray-600">
-      {/* Business summary */}
-      <div className="flex items-start gap-1">
-        <span className="text-gray-400 shrink-0">Business:</span>
-        <span className="truncate">
-          {profile
-            ? `${profile.industry}${profile.sizeSignals[0] && profile.sizeSignals[0] !== "Unknown" ? ` | ${profile.sizeSignals[0]}` : ""}${profile.digitalPresence.website ? ` | ${profile.digitalPresence.website}` : ""}`
-            : "No data"}
-        </span>
-      </div>
-
-      {/* Best contact */}
-      <div className="flex items-start gap-1">
-        <span className="text-gray-400 shrink-0">Contact:</span>
-        <span className="truncate">
-          {bestContact
-            ? [bestContact.phone, bestContact.email]
-                .filter(Boolean)
-                .join(" | ")
-            : "No contacts found"}
-        </span>
-      </div>
-
-      {/* Outreach preview */}
-      <div className="flex items-center gap-1">
-        <span className="text-gray-400 shrink-0">Message:</span>
-        <span className="truncate flex-1">
-          {outreach
-            ? `"${outreach.whatsappMessage.slice(0, 80)}..."`
-            : "No message"}
-        </span>
-        {outreach && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(outreach.whatsappMessage);
-            }}
-            className="shrink-0 px-2 py-0.5 bg-gray-200 hover:bg-gray-300 rounded text-[10px] transition-colors"
-          >
-            Copy
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
