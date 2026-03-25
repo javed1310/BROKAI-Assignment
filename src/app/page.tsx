@@ -1,20 +1,26 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { LeadRecord } from "@/services/excel-parser";
 import { PipelineResult } from "@/agents/types";
 import UploadForm from "@/components/UploadForm";
 import LeadTable from "@/components/LeadTable";
 
+type BatchStatus = "idle" | "running" | "paused";
+
 export default function Home() {
   const [leads, setLeads] = useState<LeadRecord[]>([]);
   const [results, setResults] = useState<Record<string, PipelineResult>>({});
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [isProcessingBatch, setIsProcessingBatch] = useState(false);
+  const [batchStatus, setBatchStatus] = useState<BatchStatus>("idle");
   const [batchProgress, setBatchProgress] = useState<{
     current: number;
     total: number;
   } | null>(null);
+
+  // Refs for pause/stop (avoid stale closure issues)
+  const isPausedRef = useRef(false);
+  const isStoppedRef = useRef(false);
 
   const handleUploadSuccess = useCallback((uploadedLeads: LeadRecord[]) => {
     setLeads(uploadedLeads);
@@ -41,13 +47,25 @@ export default function Home() {
   }, []);
 
   const processAll = useCallback(async () => {
-    setIsProcessingBatch(true);
+    setBatchStatus("running");
+    isPausedRef.current = false;
+    isStoppedRef.current = false;
+
     const unprocessed = leads.filter((l) => !results[l.id]);
     setBatchProgress({ current: 0, total: unprocessed.length });
 
     let consecutiveFailures = 0;
 
     for (let i = 0; i < unprocessed.length; i++) {
+      // Check for stop
+      if (isStoppedRef.current) break;
+
+      // Wait while paused
+      while (isPausedRef.current && !isStoppedRef.current) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (isStoppedRef.current) break;
+
       const lead = unprocessed[i];
       setBatchProgress({ current: i + 1, total: unprocessed.length });
       setProcessingId(lead.id);
@@ -61,7 +79,10 @@ export default function Home() {
         const data = await res.json();
         if (data.success && data.result) {
           setResults((prev) => ({ ...prev, [lead.id]: data.result }));
-          if (data.result.status === "completed" || data.result.status === "partial") {
+          if (
+            data.result.status === "completed" ||
+            data.result.status === "partial"
+          ) {
             consecutiveFailures = 0;
           } else {
             consecutiveFailures++;
@@ -76,23 +97,47 @@ export default function Home() {
 
       setProcessingId(null);
 
-      // Stop if 3 consecutive failures (likely API quota exhausted)
+      // Auto-pause on 3 consecutive failures
       if (consecutiveFailures >= 3) {
-        alert(
-          "Paused: 3 consecutive failures detected. Your API quota may be exhausted. Check your API keys or try again later."
-        );
-        break;
+        isPausedRef.current = true;
+        setBatchStatus("paused");
+        consecutiveFailures = 0;
+        // Wait for user to resume or stop
+        while (isPausedRef.current && !isStoppedRef.current) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        if (isStoppedRef.current) break;
+        setBatchStatus("running");
       }
 
       // Rate limiting delay between leads
-      if (i < unprocessed.length - 1) {
+      if (i < unprocessed.length - 1 && !isStoppedRef.current) {
         await new Promise((r) => setTimeout(r, 3000));
       }
     }
 
-    setIsProcessingBatch(false);
+    setBatchStatus("idle");
+    setProcessingId(null);
     setBatchProgress(null);
   }, [leads, results]);
+
+  const handlePause = useCallback(() => {
+    isPausedRef.current = true;
+    setBatchStatus("paused");
+  }, []);
+
+  const handleResume = useCallback(() => {
+    isPausedRef.current = false;
+    setBatchStatus("running");
+  }, []);
+
+  const handleStop = useCallback(() => {
+    isStoppedRef.current = true;
+    isPausedRef.current = false;
+    setBatchStatus("idle");
+    setProcessingId(null);
+    setBatchProgress(null);
+  }, []);
 
   const exportCSV = useCallback(() => {
     const processedLeads = leads.filter((l) => results[l.id]);
@@ -186,7 +231,8 @@ export default function Home() {
                 setLeads([]);
                 setResults({});
               }}
-              className="text-sm px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              disabled={batchStatus !== "idle"}
+              className="text-sm px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
               Upload New File
             </button>
@@ -200,7 +246,10 @@ export default function Home() {
           processingId={processingId}
           onProcessLead={processLead}
           onProcessAll={processAll}
-          isProcessingBatch={isProcessingBatch}
+          onPause={handlePause}
+          onResume={handleResume}
+          onStop={handleStop}
+          batchStatus={batchStatus}
           batchProgress={batchProgress}
         />
       </main>
