@@ -49,11 +49,11 @@ export async function runResearcher(
     );
     const allResults = searchResults.flat();
 
-    // Step 2: Scrape the top 1-2 result pages for richer content
+    // Step 2: Scrape the top result page for richer content (limit to 1 to save time)
     let scrapedContent = "";
     const urlsToScrape = allResults
       .filter((r) => r.url && !r.url.includes("google.com"))
-      .slice(0, 2);
+      .slice(0, 1);
 
     for (const result of urlsToScrape) {
       try {

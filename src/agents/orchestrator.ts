@@ -4,10 +4,12 @@ import { runOutreachWriter } from "./outreach-writer";
 import { PipelineResult } from "./types";
 import { LeadRecord } from "@/services/excel-parser";
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Run the full 3-agent pipeline for a single lead.
  * Each agent's output feeds into the next.
- * Failures are caught per-agent — the pipeline continues with fallbacks.
+ * Delays between agents to respect LLM rate limits.
  */
 export async function runPipeline(lead: LeadRecord): Promise<PipelineResult> {
   const pipelineStart = Date.now();
@@ -19,6 +21,9 @@ export async function runPipeline(lead: LeadRecord): Promise<PipelineResult> {
     existingEmail: lead.email || lead.cleanEmail,
   });
 
+  // Wait 3s between agents to let rate limits recover
+  await sleep(3000);
+
   // Agent 2: Contact Finder (uses Agent 1's output)
   const contactResult = await runContactFinder({
     profile: profileResult.data!,
@@ -26,6 +31,9 @@ export async function runPipeline(lead: LeadRecord): Promise<PipelineResult> {
     excelPhone: lead.phone,
     excelAlternateNumber: lead.alternateNumber,
   });
+
+  // Wait 3s between agents
+  await sleep(3000);
 
   // Agent 3: Outreach Writer (uses Agent 1 + Agent 2's output)
   const outreachResult = await runOutreachWriter({
@@ -36,7 +44,6 @@ export async function runPipeline(lead: LeadRecord): Promise<PipelineResult> {
   // Determine overall status
   const allSucceeded =
     profileResult.success && contactResult.success && outreachResult.success;
-  // Only "failed" if we have zero usable data at all
   const hasAnyData =
     profileResult.data || contactResult.data || outreachResult.data;
 

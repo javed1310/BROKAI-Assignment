@@ -68,27 +68,18 @@ export async function runContactFinder(
       });
     }
 
-    // Step 2: Scrape company website contact page
+    // Step 2: Scrape company website (just the main page — fast, avoids excessive requests)
     if (input.profile.digitalPresence.website) {
       const baseUrl = input.profile.digitalPresence.website;
-      const contactUrls = [
-        baseUrl,
-        `${baseUrl}/contact`,
-        `${baseUrl}/contact-us`,
-        `${baseUrl}/about`,
-      ];
-
-      for (const url of contactUrls) {
-        try {
-          const scraped = await scrapeUrl(url);
-          if (scraped.text) {
-            allScrapedText.push(`=== ${url} ===\n${scraped.text.slice(0, 2000)}`);
-            scrapedPhones.push(...scraped.phones);
-            scrapedEmails.push(...scraped.emails);
-          }
-        } catch {
-          // Continue if one page fails
+      try {
+        const scraped = await scrapeUrl(baseUrl);
+        if (scraped.text) {
+          allScrapedText.push(`=== ${baseUrl} ===\n${scraped.text.slice(0, 2000)}`);
+          scrapedPhones.push(...scraped.phones);
+          scrapedEmails.push(...scraped.emails);
         }
+      } catch {
+        // Continue if scraping fails
       }
     }
 
@@ -138,11 +129,28 @@ ${searchSnippets || "No search results found."}`;
       }
     }
 
-    // Fallback: return Excel data
+    // Fallback: build contact card from scraped data + Excel without LLM
+    const scrapedContacts: ContactEntry[] = [];
+    for (const phone of [...new Set(scrapedPhones)]) {
+      scrapedContacts.push({ phone, source: "Scraped from website" });
+    }
+    for (const email of [...new Set(scrapedEmails)]) {
+      if (!excelContacts.some((c) => c.email === email)) {
+        scrapedContacts.push({ email, source: "Scraped from website" });
+      }
+    }
+    const allContacts = [...excelContacts, ...scrapedContacts];
+    const hasScrapedData = scrapedContacts.length > 0;
+
     return {
-      success: false,
-      data: createFallbackCard(input, excelContacts),
-      error: "LLM failed to extract contacts",
+      success: hasScrapedData,
+      data: {
+        companyName: input.profile.companyName,
+        contacts: allContacts.length > 0 ? allContacts : [{ source: "No contacts found" }],
+        addresses: [],
+        confidence: hasScrapedData ? "medium" : excelContacts.length > 0 ? "low" : "low",
+      },
+      error: hasScrapedData ? undefined : "LLM failed to extract contacts",
       durationMs: Date.now() - start,
     };
   } catch (error) {
