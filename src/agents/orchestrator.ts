@@ -36,12 +36,13 @@ export async function runPipeline(lead: LeadRecord): Promise<PipelineResult> {
   // Determine overall status
   const allSucceeded =
     profileResult.success && contactResult.success && outreachResult.success;
-  const allFailed =
-    !profileResult.success && !contactResult.success && !outreachResult.success;
+  // Only "failed" if we have zero usable data at all
+  const hasAnyData =
+    profileResult.data || contactResult.data || outreachResult.data;
 
   return {
     leadId: lead.id,
-    status: allSucceeded ? "completed" : allFailed ? "failed" : "partial",
+    status: allSucceeded ? "completed" : hasAnyData ? "partial" : "failed",
     profile: profileResult,
     contacts: contactResult,
     outreach: outreachResult,

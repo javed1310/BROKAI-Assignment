@@ -14,6 +14,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
+      return NextResponse.json(
+        { error: "No LLM API key configured. Set GEMINI_API_KEY or GROQ_API_KEY in .env.local" },
+        { status: 500 }
+      );
+    }
+
     const result = await runPipeline(lead);
 
     return NextResponse.json({

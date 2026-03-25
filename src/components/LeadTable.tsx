@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { LeadRecord } from "@/services/excel-parser";
 import { PipelineResult } from "@/agents/types";
 import StatusBadge from "./StatusBadge";
@@ -133,9 +133,9 @@ export default function LeadTable({
               const isExpanded = expandedId === lead.id;
 
               return (
-                <tbody key={lead.id}>
-                  <tr
-                    className={`hover:bg-gray-50 cursor-pointer ${isExpanded ? "bg-blue-50" : ""}`}
+                <Fragment key={lead.id}>
+                <tr
+                  className={`hover:bg-gray-50 cursor-pointer ${isExpanded ? "bg-blue-50" : ""}`}
                     onClick={() =>
                       setExpandedId(isExpanded ? null : lead.id)
                     }
@@ -175,13 +175,13 @@ export default function LeadTable({
                     </td>
                   </tr>
                   {isExpanded && result && (
-                    <tr>
+                    <tr key={`${lead.id}-detail`}>
                       <td colSpan={6}>
                         <LeadDetail result={result} />
                       </td>
                     </tr>
                   )}
-                </tbody>
+                </Fragment>
               );
             })}
           </tbody>

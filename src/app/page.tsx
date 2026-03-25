@@ -45,6 +45,8 @@ export default function Home() {
     const unprocessed = leads.filter((l) => !results[l.id]);
     setBatchProgress({ current: 0, total: unprocessed.length });
 
+    let consecutiveFailures = 0;
+
     for (let i = 0; i < unprocessed.length; i++) {
       const lead = unprocessed[i];
       setBatchProgress({ current: i + 1, total: unprocessed.length });
@@ -59,12 +61,29 @@ export default function Home() {
         const data = await res.json();
         if (data.success && data.result) {
           setResults((prev) => ({ ...prev, [lead.id]: data.result }));
+          if (data.result.status === "completed" || data.result.status === "partial") {
+            consecutiveFailures = 0;
+          } else {
+            consecutiveFailures++;
+          }
+        } else {
+          consecutiveFailures++;
         }
       } catch (error) {
         console.error(`Failed to process ${lead.companyName}:`, error);
+        consecutiveFailures++;
       }
 
       setProcessingId(null);
+
+      // Stop if 3 consecutive failures (likely API quota exhausted)
+      if (consecutiveFailures >= 3) {
+        alert(
+          "Paused: 3 consecutive failures detected. Your API quota may be exhausted. Check your API keys or try again later."
+        );
+        break;
+      }
+
       // Rate limiting delay between leads
       if (i < unprocessed.length - 1) {
         await new Promise((r) => setTimeout(r, 3000));
