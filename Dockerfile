@@ -39,6 +39,10 @@ COPY . .
 # Build the Next.js app
 RUN npm run build
 
+# Copy static assets into standalone output
+RUN cp -r .next/static .next/standalone/.next/static
+RUN cp -r public .next/standalone/public || true
+
 # Expose port
 EXPOSE 3000
 
