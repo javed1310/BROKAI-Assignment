@@ -7,26 +7,41 @@ import {
   AgentResult,
 } from "./types";
 
-const SYSTEM_PROMPT = `You are a sales copywriter for Brokai Labs — an AI systems company that builds voice receptionists, SaaS platforms, and automation tools for small and medium businesses.
+const SYSTEM_PROMPT = `You are writing a WhatsApp message on behalf of Brokai Labs to a specific solar business in Rajasthan.
 
-Your task: Write a personalized WhatsApp-style cold outreach message for the given company.
+Brokai Labs builds:
+- AI Voice Receptionists (auto-answer customer calls 24/7)
+- Field operations SaaS (manage installation teams, scheduling, dispatching)
+- Communication automation (WhatsApp/SMS follow-ups with leads)
+- CRM and booking systems for SMBs
 
-Return ONLY valid JSON matching this exact schema:
+Return ONLY valid JSON:
 {
-  "whatsappMessage": "string (the actual WhatsApp message text, 3-5 sentences max)",
-  "personalizationPoints": ["string array of what you personalized based on their profile"],
-  "callToAction": "string (the specific ask in the message)"
+  "whatsappMessage": "string (the WhatsApp message)",
+  "personalizationPoints": ["what you personalized"],
+  "callToAction": "string (the ask)"
 }
 
-Message guidelines:
-- WhatsApp-style: short, conversational, no formal salutation
-- Lead with OUTCOME, not features (e.g. "never miss a customer call" not "we have AI voice tech")
-- Reference something specific about their business (industry, size, digital presence)
-- Position Brokai as solving a pain point relevant to their business
-- End with a soft call-to-action (question, not a demand)
-- Keep it under 500 characters total
-- Do NOT use emojis excessively (1-2 max)
-- Sound human, not like a template`;
+RULES FOR THE MESSAGE:
+1. MUST mention the company by name (e.g., "Hi Siddharth, saw that URJASVINI specializes in on-grid solar systems...")
+2. MUST reference ONE specific detail from their profile (their products, employee count, years in business, website, or a specific service they offer)
+3. Lead with an OUTCOME relevant to THEIR situation, not Brokai's features
+4. Keep it 3-4 short sentences MAX — this is WhatsApp, not email
+5. End with a casual question (not "Would you be open to..." — too salesy)
+6. Sound like a real person texting, not a marketing template
+
+GOOD EXAMPLE:
+"Hi Ravi, saw that Penta Solarex handles both residential and commercial installations across Rajasthan. With that volume, how are you currently managing incoming customer inquiries? We built an AI receptionist at Brokai that handles calls 24/7 — could be useful during peak season. Worth a quick look?"
+
+BAD EXAMPLE (too generic, don't do this):
+"Hi, we help solar companies automate customer communication. Would you be open to a 5-minute chat?"
+
+ADAPT the pitch based on the company:
+- No CRM detected → pitch booking/CRM system
+- Small team → pitch AI receptionist to handle overflow calls
+- Multiple locations → pitch field operations SaaS
+- No website → pitch digital presence + communication tools
+- Large company → pitch enterprise automation`;
 
 interface OutreachInput {
   profile: BusinessProfile;
@@ -39,35 +54,28 @@ export async function runOutreachWriter(
   const start = Date.now();
 
   try {
-    // Pick the best contact name if available
     const contactName = input.contacts.contacts.find((c) => c.name)?.name;
+    const contactRole = input.contacts.contacts.find((c) => c.role)?.role;
 
-    const userPrompt = `Write a personalized WhatsApp outreach message for this company.
+    // Build personalization hints for the LLM
+    const hints = buildPersonalizationHints(input.profile);
 
-=== COMPANY PROFILE ===
-Company: ${input.profile.companyName}
+    const userPrompt = `Write a WhatsApp outreach message for this company.
+
+=== COMPANY ===
+Name: ${input.profile.companyName}
+${contactName ? `Contact person: ${contactName}${contactRole ? ` (${contactRole})` : ""}` : "No contact name — start with company name instead"}
 Summary: ${input.profile.summary}
 Industry: ${input.profile.industry}
-Size signals: ${input.profile.sizeSignals.join(", ") || "Unknown"}
-Website: ${input.profile.digitalPresence.website || "None found"}
-Current systems: ${input.profile.systemsUsed.join(", ") || "Unknown"}
+Size: ${input.profile.sizeSignals.join(", ") || "Unknown"}
+Website: ${input.profile.digitalPresence.website || "No website found"}
+Systems: ${input.profile.systemsUsed.join(", ") || "Unknown"}
 
-=== CONTACT INFO ===
-${contactName ? `Contact person: ${contactName}` : "No contact name available"}
-${input.contacts.contacts.map((c) => `${c.role ? c.role + ": " : ""}${c.phone || ""} ${c.email || ""}`).join("\n")}
+=== PERSONALIZATION HINTS (use at least ONE) ===
+${hints.join("\n")}
 
-=== BROKAI LABS CONTEXT ===
-Brokai Labs builds AI-powered systems for SMBs:
-- AI Voice Receptionists (never miss a customer call)
-- Field operations SaaS (manage technicians, schedules, dispatching)
-- Communication automation (WhatsApp, SMS, email follow-ups)
-- CRM and booking systems
-
-For a solar company, Brokai can help with:
-- Automatically answering customer inquiries about solar installations
-- Managing installation team schedules and dispatching
-- Following up with leads who requested quotes
-- Sending automated updates to customers about installation progress`;
+=== WHAT TO PITCH ===
+${getPitchDirection(input.profile)}`;
 
     const message = await callLLMForJSON<OutreachMessage>(
       SYSTEM_PROMPT,
@@ -85,33 +93,102 @@ For a solar company, Brokai can help with:
       }
     }
 
-    // Fallback: template message
     return {
       success: false,
-      data: createFallbackMessage(input),
+      data: createFallbackMessage(input, contactName),
       error: "LLM failed to generate outreach message",
       durationMs: Date.now() - start,
     };
   } catch (error) {
     return {
       success: false,
-      data: createFallbackMessage(input),
+      data: createFallbackMessage(input, input.contacts.contacts.find((c) => c.name)?.name),
       error: error instanceof Error ? error.message : "Unknown error",
       durationMs: Date.now() - start,
     };
   }
 }
 
-function createFallbackMessage(input: OutreachInput): OutreachMessage {
-  const name = input.contacts.contacts.find((c) => c.name)?.name;
-  const greeting = name ? `Hi ${name}` : "Hi";
+/**
+ * Extract specific, personalizable facts from the business profile.
+ */
+function buildPersonalizationHints(profile: BusinessProfile): string[] {
+  const hints: string[] = [];
+
+  if (profile.summary && profile.summary !== "Limited web presence found.") {
+    // Extract specific services/products mentioned
+    const keywords = ["rooftop", "ground mount", "on-grid", "off-grid", "hybrid", "EPC", "residential", "commercial", "industrial", "installer", "dealer", "manufacturer"];
+    for (const kw of keywords) {
+      if (profile.summary.toLowerCase().includes(kw)) {
+        hints.push(`They do ${kw} solar work — reference this`);
+      }
+    }
+  }
+
+  for (const signal of profile.sizeSignals) {
+    if (signal !== "Unknown") {
+      hints.push(`Size detail: "${signal}" — mention this to show you researched them`);
+    }
+  }
+
+  if (profile.digitalPresence.website) {
+    hints.push(`They have a website (${profile.digitalPresence.website}) — shows digital awareness`);
+  } else {
+    hints.push(`No website found — they may need help with digital presence`);
+  }
+
+  if (profile.systemsUsed.some((s) => s.toLowerCase().includes("no crm"))) {
+    hints.push(`No CRM detected — pitch Brokai's CRM/booking system`);
+  }
+
+  if (profile.digitalPresence.directories.length > 0) {
+    hints.push(`Listed on ${profile.digitalPresence.directories.length} directories — they're actively seeking business`);
+  }
+
+  if (hints.length === 0) {
+    hints.push(`They are a ${profile.industry} company in Rajasthan`);
+  }
+
+  return hints;
+}
+
+/**
+ * Determine the best Brokai product to pitch based on the company profile.
+ */
+function getPitchDirection(profile: BusinessProfile): string {
+  const systems = profile.systemsUsed.join(" ").toLowerCase();
+  const summary = profile.summary.toLowerCase();
+  const size = profile.sizeSignals.join(" ").toLowerCase();
+
+  if (systems.includes("no crm")) {
+    return "Pitch: Brokai's CRM and booking system — they have no CRM, so managing customer inquiries and installation schedules is likely manual and chaotic.";
+  }
+  if (size.includes("50") || size.includes("100") || size.includes("large")) {
+    return "Pitch: Brokai's field operations SaaS — with a larger team, managing technicians, schedules, and dispatching is a pain point.";
+  }
+  if (!profile.digitalPresence.website) {
+    return "Pitch: Brokai's communication automation — without a website, they rely on phone/WhatsApp for leads, so an AI receptionist that never misses a call is valuable.";
+  }
+  if (summary.includes("residential") || summary.includes("rooftop")) {
+    return "Pitch: Brokai's AI voice receptionist — residential solar companies get high call volume from homeowners wanting quotes. An AI that handles initial inquiries saves time.";
+  }
+  return "Pitch: Brokai's AI voice receptionist — solar companies miss customer calls during installations. An always-available AI that handles inquiries and books appointments increases conversions.";
+}
+
+function createFallbackMessage(
+  input: OutreachInput,
+  contactName?: string
+): OutreachMessage {
+  const greeting = contactName ? `Hi ${contactName}` : `Hi`;
+  const specific = input.profile.sizeSignals.find((s) => s !== "Unknown") || input.profile.industry;
 
   return {
-    whatsappMessage: `${greeting}, I'm reaching out from Brokai Labs. We help solar businesses like ${input.profile.companyName} automate customer communication with AI-powered voice receptionists and follow-up systems. Would you be open to a quick 5-minute chat about how we could help you handle more customer inquiries without missing any?`,
+    whatsappMessage: `${greeting}, noticed ${input.profile.companyName} is doing great work in ${input.profile.industry}${specific !== input.profile.industry ? ` (${specific})` : ""} in Rajasthan. Quick question — how are you currently handling incoming customer inquiries when your team is out on installations? We built something at Brokai Labs that might help. Happy to share a quick demo if you're curious.`,
     personalizationPoints: [
       `Company name: ${input.profile.companyName}`,
       `Industry: ${input.profile.industry}`,
+      `Detail: ${specific}`,
     ],
-    callToAction: "Quick 5-minute chat",
+    callToAction: "Quick demo if curious",
   };
 }
