@@ -56,6 +56,25 @@ export default function LeadDetail({ result }: LeadDetailProps) {
                   <span>{profile.data.systemsUsed.join(", ")}</span>
                 </div>
               )}
+            {profile.data.searchSources && profile.data.searchSources.length > 0 && (
+              <div className="mt-2 pt-2 border-t">
+                <span className="font-medium text-gray-600 text-xs">Research Sources:</span>
+                <ul className="mt-1 space-y-0.5">
+                  {profile.data.searchSources.slice(0, 5).map((url, i) => (
+                    <li key={i}>
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline text-xs break-all"
+                      >
+                        {url}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-gray-400 text-sm">No profile data available</p>

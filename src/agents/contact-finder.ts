@@ -104,16 +104,15 @@ export async function runContactFinder(
       allSearchResults.push(...results);
     }
 
-    // Step 4: Extract phones, emails, and WhatsApp from search snippets
+    // Step 4: Extract phones and emails from search snippets
+    // NOTE: WhatsApp detection is handled ONLY by the scraper (wa.me links,
+    // api.whatsapp.com links, explicit "WhatsApp: <number>" text patterns).
+    // We do NOT mark numbers as WhatsApp just because the word appears in a snippet.
     for (const result of allSearchResults) {
       const snippetPhones = result.snippet.match(PHONE_REGEX) || [];
       const snippetEmails = result.snippet.match(EMAIL_REGEX) || [];
       allPhones.push(...snippetPhones);
       allEmails.push(...snippetEmails);
-      // Check if snippet mentions WhatsApp near a phone number
-      if (/whatsapp/i.test(result.snippet)) {
-        verifiedWhatsAppNumbers.push(...snippetPhones);
-      }
     }
 
     const searchSnippets = allSearchResults

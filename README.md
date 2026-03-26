@@ -6,7 +6,7 @@ Built for the [Brokai Labs](https://brokailabs.com) AI Engineer Intern assessmen
 
 ## Live Demo
 
-**Deployed URL**: _(will be added after Railway deployment)_
+**Deployed URL**: https://brokai-assignment-production.up.railway.app
 
 ## Architecture
 
@@ -37,7 +37,8 @@ Excel Upload → Agent 01: Researcher → Agent 02: Contact Finder → Agent 03:
 |-------|-----------|
 | Framework | Next.js 15 (App Router, TypeScript) |
 | Styling | Tailwind CSS |
-| LLM | Google Gemini 1.5 Flash (free tier) |
+| LLM (Primary) | Google Gemini 2.0 Flash (free tier) |
+| LLM (Fallback) | Groq Llama 3.3 70B (free tier) |
 | Web Search | Serper.dev (2,500 free searches) |
 | Scraping | Cheerio (static) + Playwright (JS-rendered) |
 | Validation | Zod (typed agent contracts) |
@@ -84,8 +85,8 @@ src/
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Javed-Coherent/Nutri_updates.git
-   cd Nutri_updates
+   git clone https://github.com/javed1310/BROKAI-Assignment.git
+   cd BROKAI-Assignment
    ```
 
 2. Install dependencies:
@@ -121,6 +122,7 @@ src/
 |----------|----------|-------------|
 | `GEMINI_API_KEY` | Yes | Google Gemini API key (free tier: 15 RPM, 1500 req/day) |
 | `SERPER_API_KEY` | Yes | Serper.dev API key (2,500 free searches on signup) |
+| `GROQ_API_KEY` | No | Groq API key — used as fallback LLM when Gemini is rate-limited (free tier: 30 RPM) |
 
 ## Failure Handling
 
