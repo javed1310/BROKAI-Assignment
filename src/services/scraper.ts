@@ -4,6 +4,7 @@ export interface ScrapedContent {
   text: string;
   phones: string[];
   emails: string[];
+  whatsappNumbers: string[];
   title: string;
 }
 
@@ -58,8 +59,9 @@ async function scrapeWithCheerio(url: string): Promise<ScrapedContent> {
 
     const phones = extractPhones(text);
     const emails = extractEmails(text);
+    const whatsappNumbers = extractWhatsApp(html, text);
 
-    return { text, phones, emails, title };
+    return { text, phones, emails, whatsappNumbers, title };
   } catch {
     return emptyContent();
   }
@@ -110,8 +112,9 @@ async function scrapeWithPlaywright(url: string): Promise<ScrapedContent> {
 
     const phones = extractPhones(text);
     const emails = extractEmails(text);
+    const whatsappNumbers = extractWhatsApp("", text);
 
-    return { text, phones, emails, title };
+    return { text, phones, emails, whatsappNumbers, title };
   } catch {
     return emptyContent();
   }
@@ -129,6 +132,35 @@ function extractEmails(text: string): string[] {
   );
 }
 
+/**
+ * Extract verified WhatsApp numbers from HTML links and text mentions.
+ * Only returns numbers with actual WhatsApp evidence.
+ */
+function extractWhatsApp(html: string, text: string): string[] {
+  const numbers: string[] = [];
+
+  // Detect wa.me links: wa.me/919887755000
+  const waLinkRegex = /wa\.me\/(\d{10,13})/g;
+  let match;
+  while ((match = waLinkRegex.exec(html)) !== null) {
+    numbers.push(match[1]);
+  }
+
+  // Detect api.whatsapp.com links
+  const waApiRegex = /api\.whatsapp\.com\/send\?phone=(\d{10,13})/g;
+  while ((match = waApiRegex.exec(html)) !== null) {
+    numbers.push(match[1]);
+  }
+
+  // Detect "WhatsApp" text near a phone number
+  const waTextRegex = /whatsapp[\s:]*(?:\+91[\s-]?)?([6-9]\d{9})/gi;
+  while ((match = waTextRegex.exec(text)) !== null) {
+    numbers.push(match[1]);
+  }
+
+  return [...new Set(numbers)];
+}
+
 function emptyContent(): ScrapedContent {
-  return { text: "", phones: [], emails: [], title: "" };
+  return { text: "", phones: [], emails: [], whatsappNumbers: [], title: "" };
 }

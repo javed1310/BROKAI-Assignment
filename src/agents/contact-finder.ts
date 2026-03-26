@@ -35,7 +35,7 @@ CRITICAL RULES:
 - PHONE NUMBERS are the #1 priority. Extract every phone number you find.
 - Indian phone numbers are 10 digits starting with 6-9, often prefixed with +91 or 91.
 - Look for patterns like: 098877 55000, +91 98877 55000, 9887755000, 91-98877-55000
-- If you find a phone number, ALSO set whatsapp to the same number (Indian businesses use WhatsApp on their phone).
+- ONLY set whatsapp if there is EXPLICIT evidence: a wa.me link, "WhatsApp" text near the number, or a "Chat on WhatsApp" button. Do NOT assume every phone is WhatsApp.
 - Extract phone numbers from search snippets — they often appear in the text.
 - Include the source URL for EVERY contact entry.
 - Set confidence: "high" if from company website, "medium" if from directories, "low" if only from dataset.
@@ -58,23 +58,23 @@ export async function runContactFinder(
     const allPhones: string[] = [];
     const allEmails: string[] = [];
 
-    // Step 1: Collect Excel data
+    // Step 1: Collect Excel data (no WhatsApp assumption — only set if verified)
     const excelContacts: ContactEntry[] = [];
     if (input.excelEmail || input.excelPhone) {
       excelContacts.push({
         email: input.excelEmail || undefined,
         phone: input.excelPhone || undefined,
-        whatsapp: input.excelPhone || undefined,
         source: "Provided dataset (Excel)",
       });
     }
     if (input.excelAlternateNumber) {
       excelContacts.push({
         phone: input.excelAlternateNumber,
-        whatsapp: input.excelAlternateNumber,
         source: "Provided dataset (Excel) - alternate number",
       });
     }
+
+    const verifiedWhatsAppNumbers: string[] = [];
 
     // Step 2: Scrape company website
     if (input.profile.digitalPresence.website) {
@@ -85,6 +85,7 @@ export async function runContactFinder(
           allScrapedText.push(`=== ${baseUrl} ===\n${scraped.text.slice(0, 2000)}`);
           allPhones.push(...scraped.phones);
           allEmails.push(...scraped.emails);
+          verifiedWhatsAppNumbers.push(...scraped.whatsappNumbers);
         }
       } catch {
         // Continue
@@ -103,12 +104,16 @@ export async function runContactFinder(
       allSearchResults.push(...results);
     }
 
-    // Step 4: Extract phones and emails from search snippets using regex
+    // Step 4: Extract phones, emails, and WhatsApp from search snippets
     for (const result of allSearchResults) {
       const snippetPhones = result.snippet.match(PHONE_REGEX) || [];
       const snippetEmails = result.snippet.match(EMAIL_REGEX) || [];
       allPhones.push(...snippetPhones);
       allEmails.push(...snippetEmails);
+      // Check if snippet mentions WhatsApp near a phone number
+      if (/whatsapp/i.test(result.snippet)) {
+        verifiedWhatsAppNumbers.push(...snippetPhones);
+      }
     }
 
     const searchSnippets = allSearchResults
@@ -135,13 +140,16 @@ ${uniquePhones.length > 0 ? uniquePhones.join(", ") : "None found"}
 === EMAIL ADDRESSES FOUND BY SCRAPER ===
 ${uniqueEmails.length > 0 ? uniqueEmails.join(", ") : "None found"}
 
+=== VERIFIED WHATSAPP NUMBERS (from wa.me links or explicit "WhatsApp" mentions) ===
+${[...new Set(verifiedWhatsAppNumbers)].length > 0 ? [...new Set(verifiedWhatsAppNumbers)].join(", ") : "None verified"}
+
 === SCRAPED WEBSITE CONTENT ===
 ${allScrapedText.join("\n\n") || "No website content available."}
 
 === SEARCH RESULTS (look for phone numbers in these snippets!) ===
 ${searchSnippets || "No search results found."}
 
-IMPORTANT: Extract every phone number and email you can find. Set whatsapp = phone for each contact.`;
+IMPORTANT: Extract every phone number and email. Only set whatsapp if there is explicit evidence (verified numbers above, wa.me links, or "WhatsApp" text).`;
 
     const contactCard = await callLLMForJSON<ContactCard>(
       SYSTEM_PROMPT,
@@ -161,12 +169,13 @@ IMPORTANT: Extract every phone number and email you can find. Set whatsapp = pho
     }
 
     // Fallback: build contact card from regex-extracted data + Excel
+    const verifiedWASet = new Set(verifiedWhatsAppNumbers);
     const scrapedContacts: ContactEntry[] = [];
     for (const phone of uniquePhones) {
       if (!excelContacts.some((c) => c.phone === phone)) {
         scrapedContacts.push({
           phone,
-          whatsapp: phone,
+          whatsapp: verifiedWASet.has(phone) ? phone : undefined,
           source: "Extracted from web search results",
         });
       }
@@ -195,7 +204,6 @@ IMPORTANT: Extract every phone number and email you can find. Set whatsapp = pho
       excelContacts.push({
         email: input.excelEmail || undefined,
         phone: input.excelPhone || undefined,
-        whatsapp: input.excelPhone || undefined,
         source: "Provided dataset (Excel)",
       });
     }
