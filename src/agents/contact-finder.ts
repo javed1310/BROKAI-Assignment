@@ -9,31 +9,37 @@ import {
   AgentResult,
 } from "./types";
 
-const SYSTEM_PROMPT = `You are a contact information specialist. Given scraped content from websites, search results, and existing data, extract all contact details for the company.
+const PHONE_REGEX = /(?:\+91[\s-]?)?[6-9]\d{9}/g;
+const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
-Return ONLY valid JSON matching this exact schema:
+const SYSTEM_PROMPT = `You are a contact information specialist for Indian businesses. Your PRIMARY job is to find PHONE NUMBERS, EMAIL ADDRESSES, and WHATSAPP NUMBERS.
+
+Return ONLY valid JSON matching this schema:
 {
   "companyName": "string",
   "contacts": [
     {
-      "name": "string (optional - contact person name if found)",
+      "name": "string (optional - contact person name)",
       "role": "string (optional - their role/title)",
-      "phone": "string (optional - phone number)",
-      "email": "string (optional - email address)",
-      "whatsapp": "string (optional - WhatsApp number if different from phone)",
-      "source": "string (URL or description of where this was found)"
+      "phone": "string (PRIORITY - phone number in Indian format)",
+      "email": "string (email address)",
+      "whatsapp": "string (WhatsApp number - for Indian businesses, this is usually the same as the phone number)",
+      "source": "string (URL where this contact was found)"
     }
   ],
   "addresses": ["string array of physical addresses found"],
   "confidence": "high | medium | low"
 }
 
-Rules:
-- Include ALL contact entries found from different sources.
-- Always include the source URL for each contact.
-- Set confidence to "high" if you found contacts from the company website, "medium" if from directories, "low" if only from the provided dataset.
-- Do NOT make up contact information. Only extract what is actually present in the data.
-- Phone numbers should be in Indian format where applicable.`;
+CRITICAL RULES:
+- PHONE NUMBERS are the #1 priority. Extract every phone number you find.
+- Indian phone numbers are 10 digits starting with 6-9, often prefixed with +91 or 91.
+- Look for patterns like: 098877 55000, +91 98877 55000, 9887755000, 91-98877-55000
+- If you find a phone number, ALSO set whatsapp to the same number (Indian businesses use WhatsApp on their phone).
+- Extract phone numbers from search snippets — they often appear in the text.
+- Include the source URL for EVERY contact entry.
+- Set confidence: "high" if from company website, "medium" if from directories, "low" if only from dataset.
+- Do NOT make up information.`;
 
 interface ContactFinderInput {
   profile: BusinessProfile;
@@ -49,67 +55,93 @@ export async function runContactFinder(
 
   try {
     const allScrapedText: string[] = [];
-    const scrapedPhones: string[] = [];
-    const scrapedEmails: string[] = [];
+    const allPhones: string[] = [];
+    const allEmails: string[] = [];
 
-    // Step 1: Start with Excel data
+    // Step 1: Collect Excel data
     const excelContacts: ContactEntry[] = [];
     if (input.excelEmail || input.excelPhone) {
       excelContacts.push({
         email: input.excelEmail || undefined,
         phone: input.excelPhone || undefined,
+        whatsapp: input.excelPhone || undefined,
         source: "Provided dataset (Excel)",
       });
     }
     if (input.excelAlternateNumber) {
       excelContacts.push({
         phone: input.excelAlternateNumber,
+        whatsapp: input.excelAlternateNumber,
         source: "Provided dataset (Excel) - alternate number",
       });
     }
 
-    // Step 2: Scrape company website (just the main page — fast, avoids excessive requests)
+    // Step 2: Scrape company website
     if (input.profile.digitalPresence.website) {
       const baseUrl = input.profile.digitalPresence.website;
       try {
         const scraped = await scrapeUrl(baseUrl);
         if (scraped.text) {
           allScrapedText.push(`=== ${baseUrl} ===\n${scraped.text.slice(0, 2000)}`);
-          scrapedPhones.push(...scraped.phones);
-          scrapedEmails.push(...scraped.emails);
+          allPhones.push(...scraped.phones);
+          allEmails.push(...scraped.emails);
         }
       } catch {
-        // Continue if scraping fails
+        // Continue
       }
     }
 
-    // Step 3: Search for contact info
-    const contactQuery = `"${input.profile.companyName}" contact number ${input.profile.digitalPresence.website ? "" : "Rajasthan"}`;
-    const searchResults = await webSearch(contactQuery, 5);
+    // Step 3: Multiple targeted searches for phone/contact info
+    const searchQueries = [
+      `"${input.profile.companyName}" phone contact Rajasthan`,
+      `"${input.profile.companyName}" site:indiamart.com OR site:justdial.com`,
+    ];
 
-    const searchSnippets = searchResults
+    const allSearchResults = [];
+    for (const query of searchQueries) {
+      const results = await webSearch(query, 5);
+      allSearchResults.push(...results);
+    }
+
+    // Step 4: Extract phones and emails from search snippets using regex
+    for (const result of allSearchResults) {
+      const snippetPhones = result.snippet.match(PHONE_REGEX) || [];
+      const snippetEmails = result.snippet.match(EMAIL_REGEX) || [];
+      allPhones.push(...snippetPhones);
+      allEmails.push(...snippetEmails);
+    }
+
+    const searchSnippets = allSearchResults
       .map((r) => `[${r.title}] (${r.url})\n${r.snippet}`)
       .join("\n\n");
 
-    // Step 4: Build prompt and call LLM
-    const userPrompt = `Find contact information for: ${input.profile.companyName}
+    // Deduplicate
+    const uniquePhones = [...new Set(allPhones)];
+    const uniqueEmails = [...new Set(allEmails.filter(
+      (e) => !e.endsWith(".png") && !e.endsWith(".jpg")
+    ))];
+
+    // Step 5: Call LLM with all collected data
+    const userPrompt = `Find ALL contact information for: ${input.profile.companyName}
 
 === EXISTING DATA (from provided dataset) ===
-${input.excelEmail ? `Email: ${input.excelEmail}` : "No email in dataset"}
-${input.excelPhone ? `Phone: ${input.excelPhone}` : "No phone in dataset"}
-${input.excelAlternateNumber ? `Alternate: ${input.excelAlternateNumber}` : ""}
+Email: ${input.excelEmail || "Not available"}
+Phone: ${input.excelPhone || "Not available"}
+${input.excelAlternateNumber ? `Alternate phone: ${input.excelAlternateNumber}` : ""}
+
+=== PHONE NUMBERS FOUND BY SCRAPER (extract these!) ===
+${uniquePhones.length > 0 ? uniquePhones.join(", ") : "None found"}
+
+=== EMAIL ADDRESSES FOUND BY SCRAPER ===
+${uniqueEmails.length > 0 ? uniqueEmails.join(", ") : "None found"}
 
 === SCRAPED WEBSITE CONTENT ===
 ${allScrapedText.join("\n\n") || "No website content available."}
 
-=== ADDITIONAL PHONES FOUND BY SCRAPER ===
-${scrapedPhones.length > 0 ? scrapedPhones.join(", ") : "None"}
+=== SEARCH RESULTS (look for phone numbers in these snippets!) ===
+${searchSnippets || "No search results found."}
 
-=== ADDITIONAL EMAILS FOUND BY SCRAPER ===
-${scrapedEmails.length > 0 ? scrapedEmails.join(", ") : "None"}
-
-=== SEARCH RESULTS ===
-${searchSnippets || "No search results found."}`;
+IMPORTANT: Extract every phone number and email you can find. Set whatsapp = phone for each contact.`;
 
     const contactCard = await callLLMForJSON<ContactCard>(
       SYSTEM_PROMPT,
@@ -119,7 +151,6 @@ ${searchSnippets || "No search results found."}`;
     if (contactCard) {
       const parsed = ContactCardSchema.safeParse(contactCard);
       if (parsed.success) {
-        // Merge Excel contacts if not already included
         const mergedContacts = mergeContacts(parsed.data.contacts, excelContacts);
         return {
           success: true,
@@ -129,28 +160,33 @@ ${searchSnippets || "No search results found."}`;
       }
     }
 
-    // Fallback: build contact card from scraped data + Excel without LLM
+    // Fallback: build contact card from regex-extracted data + Excel
     const scrapedContacts: ContactEntry[] = [];
-    for (const phone of [...new Set(scrapedPhones)]) {
-      scrapedContacts.push({ phone, source: "Scraped from website" });
+    for (const phone of uniquePhones) {
+      if (!excelContacts.some((c) => c.phone === phone)) {
+        scrapedContacts.push({
+          phone,
+          whatsapp: phone,
+          source: "Extracted from web search results",
+        });
+      }
     }
-    for (const email of [...new Set(scrapedEmails)]) {
+    for (const email of uniqueEmails) {
       if (!excelContacts.some((c) => c.email === email)) {
-        scrapedContacts.push({ email, source: "Scraped from website" });
+        scrapedContacts.push({ email, source: "Extracted from web search results" });
       }
     }
     const allContacts = [...excelContacts, ...scrapedContacts];
-    const hasScrapedData = scrapedContacts.length > 0;
 
     return {
-      success: hasScrapedData,
+      success: allContacts.length > 0,
       data: {
         companyName: input.profile.companyName,
         contacts: allContacts.length > 0 ? allContacts : [{ source: "No contacts found" }],
         addresses: [],
-        confidence: hasScrapedData ? "medium" : excelContacts.length > 0 ? "low" : "low",
+        confidence: scrapedContacts.length > 0 ? "medium" : excelContacts.length > 0 ? "low" : "low",
       },
-      error: hasScrapedData ? undefined : "LLM failed to extract contacts",
+      error: scrapedContacts.length > 0 ? undefined : "Limited contact info found",
       durationMs: Date.now() - start,
     };
   } catch (error) {
@@ -159,13 +195,19 @@ ${searchSnippets || "No search results found."}`;
       excelContacts.push({
         email: input.excelEmail || undefined,
         phone: input.excelPhone || undefined,
+        whatsapp: input.excelPhone || undefined,
         source: "Provided dataset (Excel)",
       });
     }
 
     return {
       success: false,
-      data: createFallbackCard(input, excelContacts),
+      data: {
+        companyName: input.profile.companyName,
+        contacts: excelContacts.length > 0 ? excelContacts : [{ source: "No contacts found" }],
+        addresses: [],
+        confidence: "low",
+      },
       error: error instanceof Error ? error.message : "Unknown error",
       durationMs: Date.now() - start,
     };
@@ -188,19 +230,4 @@ function mergeContacts(
     }
   }
   return merged;
-}
-
-function createFallbackCard(
-  input: ContactFinderInput,
-  excelContacts: ContactEntry[]
-): ContactCard {
-  return {
-    companyName: input.profile.companyName,
-    contacts:
-      excelContacts.length > 0
-        ? excelContacts
-        : [{ source: "No contacts found" }],
-    addresses: [],
-    confidence: excelContacts.length > 0 ? "low" : "low",
-  };
 }
