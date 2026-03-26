@@ -14,9 +14,10 @@ const groq = process.env.GROQ_API_KEY
 const geminiRateLimiter = new RateLimiter(12); // 12 RPM (under Gemini's 15 RPM)
 const groqRateLimiter = new RateLimiter(20); // 20 RPM (under Groq's 30 RPM)
 
-// Circuit breaker: skip a provider for 60s after 429
+// Circuit breaker: skip a provider after 429
 let geminiDownUntil = 0;
 let groqDownUntil = 0;
+let geminiFailCount = 0;
 
 interface LLMResponse {
   text: string;
@@ -109,34 +110,37 @@ export async function callLLM(
   const now = Date.now();
 
   // Try Gemini first (if not circuit-broken)
+  // Escalating cooldown: 60s → 5min → 30min (likely daily quota exhausted)
+  const geminiCooldown = geminiFailCount >= 3 ? 1800000 : geminiFailCount >= 1 ? 300000 : 60000;
   if (genAI && now > geminiDownUntil) {
     try {
-      return await callGemini(systemPrompt, userPrompt);
+      const result = await callGemini(systemPrompt, userPrompt);
+      geminiFailCount = 0; // Reset on success
+      return result;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
 
       if (isRateLimited(err)) {
-        // Circuit break: skip Gemini for 60s
-        geminiDownUntil = Date.now() + 60000;
-        console.warn("Gemini rate limited — circuit breaker ON for 60s");
-      } else if (!isNonRetryable(err)) {
+        geminiFailCount++;
+        geminiDownUntil = Date.now() + geminiCooldown;
+        console.warn(`Gemini rate limited — circuit breaker ON for ${geminiCooldown / 1000}s (fail #${geminiFailCount})`);
+      } else if (isNonRetryable(err)) {
+        geminiFailCount = 99; // Permanently skip for this session
+        geminiDownUntil = Date.now() + 3600000; // 1 hour
+        console.warn(`Gemini non-retryable error — disabled for 1 hour: ${err.message.slice(0, 100)}`);
+      } else {
         // One retry for transient errors
         try {
           await new Promise((r) => setTimeout(r, 2000));
-          return await callGemini(systemPrompt, userPrompt);
+          const result = await callGemini(systemPrompt, userPrompt);
+          geminiFailCount = 0;
+          return result;
         } catch (retryErr) {
-          const re = retryErr instanceof Error ? retryErr : new Error(String(retryErr));
-          if (isRateLimited(re)) {
-            geminiDownUntil = Date.now() + 60000;
-            console.warn("Gemini rate limited on retry — circuit breaker ON for 60s");
-          }
+          geminiFailCount++;
+          geminiDownUntil = Date.now() + geminiCooldown;
         }
-      } else {
-        console.warn(`Gemini non-retryable error: ${err.message.slice(0, 100)}`);
       }
     }
-  } else if (genAI && now <= geminiDownUntil) {
-    console.log("Gemini circuit-broken, skipping...");
   }
 
   // Fallback to Groq (if not circuit-broken)
@@ -147,15 +151,15 @@ export async function callLLM(
       const err = error instanceof Error ? error : new Error(String(error));
 
       if (isRateLimited(err)) {
-        // Wait 15s and retry once (rate limits are per-minute)
-        console.warn("Groq rate limited — waiting 15s before retry...");
-        await new Promise((r) => setTimeout(r, 15000));
+        // Wait 30s and retry (rate limits are per-minute, need full recovery)
+        console.warn("Groq rate limited — waiting 30s before retry...");
+        await new Promise((r) => setTimeout(r, 30000));
         try {
           return await callGroq(systemPrompt, userPrompt);
         } catch (retryErr) {
-          // If still failing, circuit break for 30s
-          groqDownUntil = Date.now() + 30000;
-          console.warn("Groq still rate limited — circuit breaker ON for 30s");
+          // If still failing, circuit break for 60s
+          groqDownUntil = Date.now() + 60000;
+          console.warn("Groq still rate limited — circuit breaker ON for 60s");
         }
       } else {
         // One retry for non-rate-limit errors
@@ -171,18 +175,12 @@ export async function callLLM(
     console.log("Groq circuit-broken, skipping...");
   }
 
-  // Both providers down — wait for circuit breaker to expire
-  const nextAvailable = Math.min(
-    genAI ? geminiDownUntil : Infinity,
-    groq ? groqDownUntil : Infinity
-  );
-  const waitTime = nextAvailable - Date.now();
-
-  if (waitTime > 0 && waitTime < 60000) {
-    console.log(`Both providers down — waiting ${Math.ceil(waitTime / 1000)}s...`);
-    await new Promise((r) => setTimeout(r, waitTime + 1000));
-    // Retry once after waiting
-    return callLLM(systemPrompt, userPrompt);
+  // Both providers down — one final attempt with Groq after a wait
+  if (groq) {
+    console.log("Both providers down — waiting 30s for one final Groq attempt...");
+    await new Promise((r) => setTimeout(r, 30000));
+    groqDownUntil = 0; // Reset circuit breaker for final attempt
+    return await callGroq(systemPrompt, userPrompt);
   }
 
   throw new Error(
