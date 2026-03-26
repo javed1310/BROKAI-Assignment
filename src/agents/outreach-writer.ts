@@ -25,16 +25,20 @@ Return ONLY valid JSON:
 RULES FOR THE MESSAGE:
 1. MUST mention the company by name (e.g., "Hi Siddharth, saw that URJASVINI specializes in on-grid solar systems...")
 2. MUST reference ONE specific detail from their profile (their products, employee count, years in business, website, or a specific service they offer)
-3. Lead with an OUTCOME relevant to THEIR situation, not Brokai's features
-4. Keep it 3-4 short sentences MAX — this is WhatsApp, not email
-5. End with a casual question (not "Would you be open to..." — too salesy)
-6. Sound like a real person texting, not a marketing template
+3. MUST briefly introduce Brokai Labs as "an AI systems company that builds voice receptionists, SaaS platforms, and automation tools for SMBs" — weave this naturally into the message, don't just list it
+4. Lead with an OUTCOME relevant to THEIR situation, not Brokai's features
+5. Keep it 3-5 short sentences MAX — this is WhatsApp, not email
+6. End with a casual question (not "Would you be open to..." — too salesy)
+7. Sound like a real person texting, not a marketing template
 
 GOOD EXAMPLE:
-"Hi Ravi, saw that Penta Solarex handles both residential and commercial installations across Rajasthan. With that volume, how are you currently managing incoming customer inquiries? We built an AI receptionist at Brokai that handles calls 24/7 — could be useful during peak season. Worth a quick look?"
+"Hi Ravi, saw that Penta Solarex handles both residential and commercial installations across Rajasthan — impressive range. With that volume, how do you manage incoming customer calls when your team is out on site? At Brokai Labs we build AI voice receptionists and automation tools for businesses like yours — our system handles calls 24/7 and books appointments automatically. Could save you a few missed leads during peak season — want to see how it works?"
 
 BAD EXAMPLE (too generic, don't do this):
 "Hi, we help solar companies automate customer communication. Would you be open to a 5-minute chat?"
+
+BAD EXAMPLE (no Brokai introduction):
+"Hi Solar Planet, how do you keep track of leads? We've built a CRM that might help."
 
 ADAPT the pitch based on the company:
 - No CRM detected → pitch booking/CRM system
@@ -183,7 +187,7 @@ function createFallbackMessage(
   const specific = input.profile.sizeSignals.find((s) => s !== "Unknown") || input.profile.industry;
 
   return {
-    whatsappMessage: `${greeting}, noticed ${input.profile.companyName} is doing great work in ${input.profile.industry}${specific !== input.profile.industry ? ` (${specific})` : ""} in Rajasthan. Quick question — how are you currently handling incoming customer inquiries when your team is out on installations? We built something at Brokai Labs that might help. Happy to share a quick demo if you're curious.`,
+    whatsappMessage: `${greeting}, noticed ${input.profile.companyName} is doing great work in ${input.profile.industry}${specific !== input.profile.industry ? ` (${specific})` : ""} in Rajasthan. Quick question — how are you currently handling incoming customer inquiries when your team is out on installations? At Brokai Labs, we build AI voice receptionists, SaaS platforms, and automation tools for businesses like yours — happy to share a quick demo if you're curious.`,
     personalizationPoints: [
       `Company name: ${input.profile.companyName}`,
       `Industry: ${input.profile.industry}`,
